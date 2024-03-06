@@ -3,6 +3,17 @@ import math
 import random
 import folium
 import requests
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+class City(BaseModel):
+    name: str
+
+def get_db_connection():
+    conn = sqlite3.connect('my_database.db')
+    cursor = conn.cursor()
+    return cursor
 
 def haversine(lat1, lon1, lat2, lon2):
     # Radius of the Earth in kilometers
@@ -18,140 +29,118 @@ def haversine(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     distance = R * c
     return distance
+#Not random city instead api call for that
 
-def find_closest_place(city_latitude, city_longitude):
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to the closest place finder!"}
+
+@app.get("/cities/{city_name}")
+def get_city_coordinates(city_name: str):
+    cursor = get_db_connection()
+    cursor.execute("SELECT latitude, longitude FROM cities WHERE name=?", (city_name,))
+    data = cursor.fetchone()
+    if data is None:
+        return {"error": "City not found"}
+    else:
+        return {"latitude": data[0], "longitude": data[1]}
+
+
+@app.post("/closest_place/")
+async def get_closest_place(city: City):
     conn = sqlite3.connect('my_database.db')
     cursor = conn.cursor()
-    cursor.execute('SELECT POIID, Nom_du_POI, Latitude, Longitude FROM places')
-    places = cursor.fetchall()
-    closest_place = None
-    min_distance = float('inf')
 
-    for place_id, place_name, place_latitude, place_longitude in places:
-        distance = haversine(city_latitude, city_longitude, place_latitude, place_longitude)
-        if distance < min_distance:
-            min_distance = distance
-            closest_place = (place_id, place_name)
+    # Retrieve the city details
+    cursor.execute('SELECT id, latitude, longitude FROM cities WHERE name = ?', (city.name,))
+    city_id, city_latitude, city_longitude = cursor.fetchone()
 
-    return closest_place
+    # Find the closest place
+    closest_place_id, closest_place_name = find_closest_place(city_latitude, city_longitude)
 
-# Generate a random city ID
-conn = sqlite3.connect('my_database.db')
-cursor = conn.cursor()
-cursor.execute('SELECT COUNT(*) FROM cities')
-total_cities = cursor.fetchone()[0]
-random_city_id = random.randint(1, total_cities)
+    return {
+        "random_city_id": city_id,
+        "city_name": city.name,
+        "city_coordinates": {"latitude": city_latitude, "longitude": city_longitude},
+        "closest_place": {"id": closest_place_id, "name": closest_place_name}
+    }
 
-# Retrieve the random city details
-cursor.execute('SELECT name, latitude, longitude FROM cities WHERE id = ?', (random_city_id,))
-random_city_name, random_city_latitude, random_city_longitude = cursor.fetchone()
-
-def find_closest_place(city_latitude, city_longitude):
+    # Generate a random city ID
     conn = sqlite3.connect('my_database.db')
     cursor = conn.cursor()
-    cursor.execute('SELECT POIID, Nom_du_POI, Latitude, Longitude FROM places')
-    places = cursor.fetchall()
-    closest_place = None
-    min_distance = float('inf')
-    closest_place_latitude = None
-    closest_place_longitude = None
+    cursor.execute('SELECT COUNT(*) FROM cities')
+    total_cities = cursor.fetchone()[0]
+    #random_city_id = random.randint(1, total_cities)
 
-    for place_id, place_name, place_latitude, place_longitude in places:
-        distance = haversine(city_latitude, city_longitude, place_latitude, place_longitude)
-        if distance < min_distance:
-            min_distance = distance
-            closest_place = (place_id, place_name)
-            closest_place_latitude = place_latitude
-            closest_place_longitude = place_longitude
+    # Retrieve the random city details
+    cursor.execute('SELECT name, latitude, longitude FROM cities WHERE id = ?', (random_city_id,))
+    random_city_name, random_city_latitude, random_city_longitude = cursor.fetchone()
 
-    return closest_place, closest_place_latitude, closest_place_longitude
+    def find_closest_place(city_latitude, city_longitude):
+        conn = sqlite3.connect('my_database.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT POIID, Nom_du_POI, Latitude, Longitude FROM places')
+        places = cursor.fetchall()
+        closest_place = None
+        min_distance = float('inf')
+        closest_place_latitude = None
+        closest_place_longitude = None
 
-# Find the closest place
-(closest_place_id, closest_place_name), closest_place_latitude, closest_place_longitude = find_closest_place(random_city_latitude, random_city_longitude)
+        for place_id, place_name, place_latitude, place_longitude in places:
+            distance = haversine(city_latitude, city_longitude, place_latitude, place_longitude)
+            if distance < min_distance:
+                min_distance = distance
+                closest_place = (place_id, place_name)
+                closest_place_latitude = place_latitude
+                closest_place_longitude = place_longitude
 
-# Find the closest place
-#closest_place_id, closest_place_name = find_closest_place(random_city_latitude, random_city_longitude)
-print(f"Randomly selected city: {random_city_name}")
-print(f"City coordinates: Latitude {random_city_latitude}, Longitude {random_city_longitude}")
-print(f"Closest place: {closest_place_name}")
-'''
-####
+        return closest_place, closest_place_latitude, closest_place_longitude
 
+    # Find the closest place
+    (closest_place_id, closest_place_name), closest_place_latitude, closest_place_longitude = find_closest_place(random_city_latitude, random_city_longitude)
 
-# Create a map centered at the city's coordinates
-m = folium.Map(location=[random_city_latitude, random_city_longitude], zoom_start=13)
-
-# Add a marker for the city
-folium.Marker(
-    location=[random_city_latitude, random_city_longitude],
-    popup=f"{random_city_name}",
-    icon=folium.Icon(icon="cloud"),
-).add_to(m)
+    # Find the closest place
+    #closest_place_id, closest_place_name = find_closest_place(random_city_latitude, random_city_longitude)
+    print(f"Randomly selected city: {random_city_name}")
+    print(f"City coordinates: Latitude {random_city_latitude}, Longitude {random_city_longitude}")
+    print(f"Closest place: {closest_place_name}")
 
 
+    # Define a function to move a point north by a certain distance
+    def move_north(latitude, distance_in_km):
+        # Convert distance to degrees
+        distance_in_degrees = (distance_in_km / 111)+5
+        return latitude + distance_in_degrees
 
-# Assuming you have the coordinates for the closest place
-# Add a marker for the closest place
-folium.Marker(
-    location=[closest_place_latitude, closest_place_longitude],  # replace with actual coordinates
-    popup=f"{closest_place_name}",
-    icon=folium.Icon(color="red"),
-).add_to(m)
-'''
-##############
+    # Define a function to move a point west by a certain distance
+    def move_west(longitude, distance_in_km):
+        # Convert distance to degrees
+        distance_in_degrees = (distance_in_km / 111 )+5
+        return longitude - distance_in_degrees
 
-# OpenRouteService API url
-url = "https://api.openrouteservice.org/v2/directions/foot-walking"
+    # Move the city's coordinates 1km north and 1km west
+    start_latitude = move_north(random_city_latitude, 1)
+    start_longitude = move_west(random_city_longitude, 1)
 
-# API parameters
-params = {
-    'api_key': 'your_api_key',  # replace with your OpenRouteService API key
-    'start': f'{random_city_longitude},{random_city_latitude}',
-    'end': f'{closest_place_longitude},{closest_place_latitude}'
-}
+    # Create a map centered at the city's coordinates
+    m = folium.Map(location=[random_city_latitude, random_city_longitude], zoom_start=13)
 
-# Send a GET request to the API
-response = requests.get(url, params=params)
+    # Add a marker for the city
+    folium.Marker(
+        location=[random_city_latitude, random_city_longitude],
+        popup=f"<i>{random_city_name}</i>",
+        icon=folium.Icon(color="green"),
+    ).add_to(m)
 
-# Get the route coordinates from the API response
-route_coordinates = response.json()['features'][0]['geometry']['coordinates']
+    # Add a marker for the closest place
+    folium.Marker(
+        location=[closest_place_latitude, closest_place_longitude],
+        popup=f"<i>{closest_place_name}</i>",
+        icon=folium.Icon(color="red"),
+    ).add_to(m)
 
-# Convert the coordinates to a format that folium can use
-route_coordinates = [(lat, lon) for lon, lat in route_coordinates]
+    # Draw a line between the city and the closest place
+    folium.PolyLine(locations=[[random_city_latitude, random_city_longitude], [closest_place_latitude, closest_place_longitude]], color="blue").add_to(m)
 
-# Create a map centered at the city's coordinates
-m = folium.Map(location=[random_city_latitude, random_city_longitude], zoom_start=13)
-
-# Add a marker for the city
-folium.Marker(
-    location=[random_city_latitude, random_city_longitude],
-    popup=f"{random_city_name}",
-    icon=folium.Icon(icon="cloud"),
-).add_to(m)
-
-# Add a marker for the closest place
-folium.Marker(
-    location=[closest_place_latitude, closest_place_longitude],
-    popup=f"{closest_place_name}",
-    icon=folium.Icon(color="red"),
-).add_to(m)
-
-# Add the route to the map
-folium.PolyLine(route_coordinates, color="blue").add_to(m)
-
-# Send a GET request to the API
-response = requests.get(url, params=params)
-
-# Check if the request was successful
-if response.status_code == 200:
-    # Try to extract the route coordinates
-    try:
-        route_coordinates = response.json()['features'][0]['geometry']['coordinates']
-    except KeyError:
-        print("The response does not contain route coordinates.")
-else:
-    print(f"API request failed with status code {response.status_code}.")
-
-
-# Display the map
-m.save('map.html')
+    # Save the map to an HTML file
+    m.save("map.html")
